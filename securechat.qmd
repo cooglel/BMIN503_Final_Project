@@ -1,0 +1,322 @@
+---
+title: "Secure Chat Burden for Infectious Disease Fellows"
+subtitle: "BMIN503/EPID600 Final Project"
+author: "Lauren Coogle"
+format: 
+  html:
+    fig-width: 8
+    fig-height: 6
+    toc: true
+    toc-location: left
+editor: visual
+number-sections: false
+embed-resources: true
+---
+
+------------------------------------------------------------------------
+
+## Overview {#sec-overview}
+
+For hospitalized children and their families, breakdowns in patient safety can result in long-lasting and costly harm. Communication failure is one of the most common contributors to patient safety events.^1-5^ With the influx of new technology intended to facilitate communication between clinicians, communication workflows are drastically changing.^6^ The Pediatric Patient Safety Learning Laboratory (PSLL) was proposed to reengineer inter-professional communication work systems using a Safety II (or, "resilient healthcare") framework. A multidisciplinary team from was established to enhance the communication work system and prevent harm to hospitalized children. Using systems engineering methodology, specific aims were established for project analysis, design, development, implementation, and evaluation.
+
+At the current stage of this project, we are focused on the first aim: to conduct a problem analysis of the inter-professional communication work system and work processes used in the care of hospitalized children. One work stream is focused specifically on secure chat communication. Under the guidance of Dr. Chris Bonafide, Attending Physician and Dr. Austin DeChalus, Pediatric Hospital Medicine Fellow, I have done an initial subgroup analysis and used the secure chat data extracted from Epic Clarity to investigate overnight chat burden for infectious disease fellows.
+
+[Link to final project GitHub repository is here.](https://github.com/cooglel/BMIN503_Final_Project)
+
+## Introduction {#sec-introduction}
+
+The infectious disease fellows have been vocal about their perceived high chat burden on overnight call shifts. Their schedules often had them working during the day, on call that night from home, and then back to work the following day. Inadequate sleep due to interruptive chats was impacting their mental health, and they feared a patient safety event would occur due to inadequate sleep.
+
+In this exploratory data analysis, we sought to characterize secure chats to infectious disease fellows on overnight call shifts. For each evening on weekdays and weekends, a single infectious disease fellow covered call from 5 pm through 7 am. As infectious disease does not admit their own patients, all communication to them would be regarding patients for consult. By characterizing these secure chat messages, we are hoping to design and develop interventions to improve the communication work system. With this baseline analysis, we can then evaluate our interventions in the clinical environment to measure impact of changes.
+
+With the ongoing introduction of technologies that transform how, when, and what clinicians communicate among each other in the inpatient setting, developing infrastructure to proactively evaluate these systems is more important than ever. Clinician-to-clinician communication impacts all hospitalized pediatric patients (around 2.5 million per year) and their families. Our Safety II-informed systems engineering methodology will also be translatable to other systems of care providing a template for the future of patient safety work. The data analysis below is a small but important part of this larger initiative.
+
+## Methods {#sec-methods}
+
+```{r}
+#| label: load-packages
+#| include: false
+
+library(dplyr)
+library(tidyverse)
+```
+
+### Data
+
+We analyzed six months worth of secure chat data, from Feb 12, 2024 through Aug 8, 2024, to evaluate communication patterns during on-call shifts for infectious disease (ID) fellows. Secure chat data is captured in Epic Clarity, a reporting database. The dataset comprised of messages sent between healthcare and administrative team members, including metadata fields such as sender ID, timestamp (converted to Eastern Standard Time), and conversation ID. A second data set with the assigned ID fellows on call was used to find the messages read for each call shift by the ID fellow on call.
+
+```{r}
+#| label: load-data
+#| include: false
+
+#code removed due to privacy
+
+#combine all ID chats received into one data frame
+chats <- rbind(chats_Feb24, chats_Mar24, chats_Apr24, chats_May24, chats_Jun24, chats_Jul24)
+
+```
+
+```{r}
+#combine all ID chats from files above (hidden code) into one data frame
+chats <- rbind(chats_Feb24, chats_Mar24, chats_Apr24, chats_May24, chats_Jun24, chats_Jul24)
+```
+
+The call schedule was downloaded from QGenda for the infectious disease (ID) fellows for those dates and initially manipulated in Microsoft Excel for ease of uploading and merging data sets. I confirmed with a current ID fellow that the call schedule available on QGenda, the physician scheduling platform, was accurate. For each overnight call shift, only one fellow is assigned. *Code hidden to protect fellow identities.*
+
+```{r}
+#| include: false
+
+#code removed for privacy
+id.fellow.list <- c()
+```
+
+Data preprocessing involved filtering chat records to include messages read by the ID fellows during their designated on-call hours (5:00 PM to 7:00 AM) and categorizing messages by call shift, rather than calendar dates.
+
+```{r}
+#filter to only ID fellow chats Read for the month
+chats_read <- chats |>
+  as.data.frame() |>
+  filter(READER_USER_ID %in% id.fellow.list) |>
+  filter(SENDER_USER_ID != READER_USER_ID) |>
+  mutate(READ_DATE_EST = as.Date(READ_TIME_EST)) |> #date column
+  mutate(READ_HOUR_EST = format(READ_TIME_EST, format='%H')) |> #hour column, for visualizations
+  select(CONTACT_DATE_REAL, CONVO_LINE, TOTAL_CHAT_SENT, READ_DATE_EST, READER_USER_ID, READ_HOUR_EST, READ_TIME_EST, READ_TIME, SENDER_USER_ID)
+
+#filter for chats read by ID fellows between 5p-7a
+chats_overnight <- chats_read |>
+  filter(as.numeric(READ_HOUR_EST) < 7 | as.numeric(READ_HOUR_EST) > 16)
+
+#add column for "ON_CALL_DATE" for ease of graphing
+chats_overnight <- chats_overnight |>
+  mutate(ON_CALL_DATE = if_else(
+    chats_overnight$READ_HOUR_EST >= 17 & chats_overnight$READ_HOUR_EST <= 23,
+    chats_overnight$READ_DATE_EST,  #use SENT_DATE_EST if the hour is between 17 and 23
+    chats_overnight$READ_DATE_EST - 1  #subtract 1 day if the hour is between 00 and 06
+    )
+  )
+
+#now, filter for only chat received by the user (ID fellow) on a call shift
+call_sched <- read_csv("~/Documents/Masters of Biomedical Informatics/503 Data Science/Final Project/ID_call_schedule.csv")
+
+chatsoncall <- chats_overnight |>
+  inner_join(call_sched, by = c("READER_USER_ID", "ON_CALL_DATE"))
+```
+
+### Initial Exploration
+
+Our initial exploratory analysis revealed the secure chat burden during the on call shifts. Summary statistics were also calculated.
+
+```{r}
+#summarize by overnight call shift
+chatsoncall_summ <- chatsoncall |>
+  group_by(ON_CALL_DATE) |>
+  summarize(number_of_chats = n())
+
+#let's graph!!
+ggplot(chatsoncall_summ, aes(x = ON_CALL_DATE, y = number_of_chats)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Total Number of Messages Read by Overnight Call Shift (Single Fellow Per Call)") +
+  labs(x = "On Call Date (5p - 7a)", y = "Number of Chats Read") +
+  theme_bw()
+
+median(chatsoncall_summ$number_of_chats)
+mean(chatsoncall_summ$number_of_chats)
+sd(chatsoncall_summ$number_of_chats)
+```
+
+To better understand the timing of the messages overnight, we looked at the messages by hour.
+
+```{r}
+
+#custom hour order needed for the x-axis
+custom_hour_order <- c(17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6)
+
+#group messages by the hour
+chats_by_hour <- chatsoncall |>
+  group_by(READ_HOUR_EST) |>
+  summarize(number_read_chats = length(unique(READ_TIME_EST)), .groups = 'drop')
+  
+#convert to a factor with custom hour order
+chats_by_hour <- chats_by_hour |>
+  mutate(READ_HOUR_EST = as.numeric(READ_HOUR_EST)) #convert to numeric to match custom_hour_order
+
+chats_by_hour <- chats_by_hour |>
+  mutate(READ_HOUR_EST = factor(READ_HOUR_EST, levels = custom_hour_order))
+
+#plot it
+ggplot(chats_by_hour, aes(x = READ_HOUR_EST, y = number_read_chats)) +
+  geom_point() +
+  ggtitle("Total Number of Messages Read by Hour, Over 6 Months ") +
+  labs(x = "Hour of the Day", y = "Total Number of Chats Read") +
+  theme_minimal()
+
+```
+
+Ideally, ID fellows do not want to be on group chats overnight. To understand if group chats were contributing to the burden of overnight chats, we viewed the number of recipients on the messages they read. Nearly three-quarters of the chats were sent only to the ID fellow on call rather than multiple recipients.
+
+```{r}
+#to get the number of recipients on each message, total the number of rows with the unique contact_date_real + convo_line minus 1 (to exclude the sender as a reader)
+
+#first filter the chats dataframe for only the overnight chats
+chats_all_overnight <- chats |>
+  as.data.frame() |>
+  filter(SENDER_USER_ID != READER_USER_ID) |>
+  mutate(READ_DATE_EST = as.Date(READ_TIME_EST)) |> #date column
+  mutate(READ_HOUR_EST = format(READ_TIME_EST, format='%H')) |> #hour column, for visualizations
+  filter(as.numeric(READ_HOUR_EST) < 7 | as.numeric(READ_HOUR_EST) > 16) |>
+  select(CONTACT_DATE_REAL, CONVO_LINE, TOTAL_CHAT_SENT, READ_DATE_EST, READER_USER_ID, READ_HOUR_EST, READ_TIME_EST, READ_TIME, SENDER_USER_ID)
+
+#now get the recipient counts for each of those overnight chats
+recipient_counts <- chats_all_overnight |>
+  group_by(TOTAL_CHAT_SENT) |> #unique variable to each message sent
+  summarize(count = n(), .groups = 'drop')
+
+#add recipient count for each read message to the overnight chat data
+chatsoncall <- chatsoncall |>
+  left_join(recipient_counts, by = "TOTAL_CHAT_SENT")
+
+#create a summary of the count of the number of recipients
+recipient_counts_summ <- chatsoncall |>
+  group_by(count) |>
+  summarise(message_count = n(), .groups = 'drop')
+
+#categorize recipient counts into groups for easier visualization
+recipient_counts_summ <- recipient_counts_summ |>
+  mutate(count_group = case_when(
+    count == 1 ~ "1",
+    count == 2 ~ "2",
+    count == 3 ~ "3",
+    count == 4 ~ "4",
+    count >= 5 ~ "5+",
+    ))
+
+#calculate percentage for each count group
+recipient_counts_summ <- recipient_counts_summ |>
+  group_by(count_group) |>
+  summarize(total_message_count = sum(message_count)) |>
+  mutate(percentage = (total_message_count / sum(total_message_count)) * 100)
+
+#graph it!
+ggplot(recipient_counts_summ, aes(x = count_group, y = percentage)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), nudge_y = 4) +
+  labs(x = "Number of Recipients", y = "Percentage of Messages") +
+  ggtitle("Percentage of Messages by Recipient Group Size for Overnight ID Fellows") +
+  theme_minimal()
+```
+
+## Results {#sec-results}
+
+After reviewing the number of messages received each night and the timing of those messages, we wanted to explore how this is impacting the ID fellows on shift.
+
+### Maximum Sleep Time
+
+For the ID fellows who are talking call at home, the overall chat burden is one thing to consider but more importantly, we need to understand the timing of these chats to calculate how much sleep they may be able to get on a call shift.
+
+```{r}
+#calculate largest gap in time between chats for each overnight call shift
+max_time_between_chats <- chatsoncall |>
+  group_by(ON_CALL_DATE) |>
+  filter(n() > 1) |> #exclude shifts with only 1 chat so calculations can work
+  arrange(READ_TIME_EST) |>  #ensure chats are in time order for each ON_CALL_DATE
+  mutate(time_diff = difftime(READ_TIME_EST, lag(READ_TIME_EST), units = "hours")) |>
+  summarize(max_time_diff = max(time_diff, na.rm = TRUE))  #calculate the maximum time difference
+
+#bar graph, per call shift
+ggplot(max_time_between_chats, aes(x = ON_CALL_DATE, y = max_time_diff)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Maximum Time Between Chats on Overnight Call Shift") +
+  labs(x = "On Call Shift Date", y = "Max Hours Between Chats") +
+  scale_y_continuous()
+
+#violin plot to visualize another way
+ggplot(max_time_between_chats, aes(x = "", y = max_time_diff)) +
+    geom_violin(fill = "seagreen") +
+    geom_boxplot(width = 0.3, outlier.shape = NA, color = "black") +
+    ggtitle("Overall View of Maximum Time Between Chats on Overnight Call Shifts (ID Fellows)") +
+    theme(axis.text.x = element_blank()) +
+    labs(y = "Maximum Hours Between Chats Each Call Shift") +
+    scale_y_continuous()
+
+#mean and sd for maximum time between chats
+max_time_between_chats |>
+  summarize(mean_max_time_diff = mean(max_time_diff, na.rm = TRUE),
+            sd_max_time_diff = sd(max_time_diff, na.rm = TRUE)
+  )
+
+#visualize time intervals to better understand burden
+max_time_between_chats <- max_time_between_chats |>
+  mutate(
+    time_category = case_when(
+      max_time_diff < 1 ~ "<1 hour",
+      max_time_diff < 2 ~ "<2 hours",
+      max_time_diff < 3 ~ "<3 hours",
+      max_time_diff < 4 ~ "<4 hours",
+      max_time_diff < 5 ~ "<5 hours",
+      max_time_diff < 6 ~ "<6 hours",
+      max_time_diff < 7 ~ "<7 hours",
+      max_time_diff < 8 ~ "<8 hours",
+      TRUE ~ "8+ hours" #all remaining values
+    )
+  )
+
+#count totals in each category and calculate cumulative percentages
+cumulative_percentages <- max_time_between_chats |>
+  group_by(time_category) |>
+  summarize(count = n(), .groups = "drop") |>
+  arrange(match(time_category, c("<1 hour", "<2 hours", "<3 hours", "<4 hours", "<5 hours", 
+                                 "<6 hours", "<7 hours", "<8 hours", "8+ hours"))) |>
+  mutate(
+    cumulative_count = cumsum(count),
+    cumulative_percentage = 100 * cumulative_count / sum(count)
+  )
+
+ggplot(cumulative_percentages, aes(x = time_category, y = cumulative_percentage, fill = time_category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(cumulative_percentage, 1), "%")), 
+            vjust = -0.5, size = 3.5) +
+  ggtitle("Percentage of Calls by Maximum Time Between Chats") +
+  labs(x = "Maximum Time Interval", y = "Cumulative Percentage of Overnight Call Shifts") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+```
+
+These visualizations help us understand the impact of maximum possible continuous sleep time for the fellows on call. Since they see patients on service the day before and the day after call, there is an incentive to maximize their sleep time to optimize the safe care they provide to patients on the day after call, as well as positively impact their physical and mental health. With interventions to decrease chat burden for ID fellows moving forward, this is the metric we will track most closely.
+
+### Chat Sender Information
+
+To help guide future interventions for optimizing communication through secure chat to ID fellows overnight, we wanted to understand who was sending these chats. The assignment data for one month of chats was obtained for initial exploration. Each user can have multiple roles at a given time and many senders did not have any role assigned at the time that the chat was sent. Due to the complications related to combining the data in a meaningful way without changing the granularity of the final data frame, I instead opted to look directly at the employee table in Epic Clarity to understand who the senders were. This choice did mean that we lost some information, such as the unit a provider was working on at the time of the chat (ie PICU) or their specific role (i.e. charge nurse, bedside nurse). In addition, the employee table is a static snapshot of users at the time the information is obtained, which means there may be some in inaccuracies for those who have changed roles since the time a chat was sent. Despite these drawbacks, we felt that the information gained would lead to insights with which we could inform our future interventions.
+
+```{r}
+library(writexl)
+
+#get a list of the unique senders (total: 752)
+senders <- as.data.frame(unique(chatsoncall$SENDER_USER_ID))
+
+#save as excel document
+write_xlsx(senders, "unique_senders.xlsx")
+
+#THIS ANALYSIS IS STILL PENDING :)
+
+```
+
+## Conclusion
+
+The analysis of overnight call secure chat data for ID fellows highlights several key patterns in communication. The daily message count by overnight shift displays consistent activity across the observed six month time period, with variability likely reflecting clinical demands. This visualization underscores the sustained workload ID fellows experience during these shifts.
+
+The hourly distribution of chat messages read by ID fellows during overnight call shifts highlights a distinct trend in workload over time. The data shows the highest volume of chats occurs during the early hours of the shift, particularly between 5 PM and 10 PM, with the peak at the start of the shift at 5 PM. After this initial surge, chat volume decreases steadily through the night, reaching its lowest point between 3 to 5 AM, before increasing slightly in the last hour of the call shift. This pattern suggests that the initial hours of call shifts are particularly demanding, requiring fellows to manage a significant volume of communication. Understanding this distribution can inform strategies to better support fellows during high-demand periods and optimize team workflows during overnight shifts.
+
+Additionally, the recipient group size analysis reveals that 72.7% of messages are directed to a single recipient: the ID fellow on call. About 1% of messages are sent to five or more recipients. This indicates that secure chat messageswith ID fellows overnight is predominantly focused on targeted, one-to-one communication rather than broad group messaging. However, over one quarter of the messages read had more than one recipient, which suggests some room for improvement to help ensure ID fellows are necessary recipients on a message overnight.
+
+Finally, the distribution of maximum time intervals between chats shows that more than one quarter of the shifts go less than 2 hours maximum between chats for the entire shift. Over 60% of calls have a maximum interval of less than 4 hours between messages. This finding suggests a high frequency of interruptions during overnight call shifts, with significant implications for workflow and rest opportunities.
+
+## References
+
+1.  Hoffman JM, Keeling NJ, Forrest CB, et al. Priorities for pediatric patient safety research. *Pediatrics.* 2019;143(2).
+2.  Dixon-Woods M. Why is patient safety so hard? A selective review of ethnographic studies. *J Health Serv Res Policy.* 2010;15:11-16.
+3.  Khan A, Furtak SL, Melvin P, Rogers JE, Schuster MA, Landrigan CP. Parent-reported errors and adverse events in hospitalized children. *JAMA Pediatr.* 2016;170(4):e154608.
+4.  Leonard M, Graham S, Bonacum D. The human factor: the critical importance of effective teamwork and communication in providing safe care. *Qual Saf Health Care.* 2004;13 Suppl 1:i85-90.
+5.  Fortescue EB, Kaushal R, Landrigan CP, et al. Prioritizing strategies for preventing medication errors and adverse drug events in pediatric inpatients. *Pediatrics.* 2003;111:722-729
+6.  Hagedorn PA, Singh A, Luo B, Bonafide CP, Simmons JM. Secure text messaging in healthcare: latent threats and opportunities to improve patient safety. *J Hosp Med.* 2020;15(6):378-380.
