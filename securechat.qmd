@@ -17,9 +17,9 @@ embed-resources: true
 
 ## Overview {#sec-overview}
 
-For hospitalized children and their families, breakdowns in patient safety can result in long-lasting and costly harm. Communication failure is one of the most common contributors to patient safety events.^1-5^ With the influx of new technology intended to facilitate communication between clinicians, communication workflows are drastically changing.^6^ The Pediatric Patient Safety Learning Laboratory (PSLL) was proposed to reengineer inter-professional communication work systems using a Safety II (or, "resilient healthcare") framework. A multidisciplinary team from was established to enhance the communication work system and prevent harm to hospitalized children. Using systems engineering methodology, specific aims were established for project analysis, design, development, implementation, and evaluation.
+For hospitalized children and their families, breakdowns in patient safety can result in long-lasting and costly harm. Communication failure is one of the most common contributors to patient safety events.^1-5^ With the influx of new technology intended to facilitate communication between clinicians, communication workflows are drastically changing.^6^ The Pediatric Patient Safety Learning Laboratory (PSLL) was proposed to reengineer inter-professional communication work systems using a Safety II (or, "resilient healthcare") framework. A multidisciplinary team was established to enhance the communication work system and prevent harm to hospitalized children. Using systems engineering methodology, specific aims were established for project analysis, design, development, implementation, and evaluation.
 
-At the current stage of this project, we are focused on the first aim: to conduct a problem analysis of the inter-professional communication work system and work processes used in the care of hospitalized children. One work stream is focused specifically on secure chat communication. Under the guidance of Dr. Chris Bonafide, Attending Physician and Dr. Austin DeChalus, Pediatric Hospital Medicine Fellow, I have done an initial subgroup analysis and used the secure chat data extracted from Epic Clarity to investigate overnight chat burden for infectious disease fellows.
+At the current stage of this project, we are focused on conducting a problem analysis of secure chat communication used in the care of hospitalized children. Under the guidance of Dr. Chris Bonafide, Attending Physician and Dr. Austin DeChalus, Pediatric Hospital Medicine Fellow, I have done an initial subgroup analysis and used the secure chat data extracted from Epic Clarity to investigate overnight chat burden for infectious disease fellows at a single institution.
 
 [Link to final project GitHub repository is here.](https://github.com/cooglel/BMIN503_Final_Project)
 
@@ -43,7 +43,7 @@ library(tidyverse)
 
 ### Data
 
-We analyzed six months worth of secure chat data, from Feb 12, 2024 through Aug 8, 2024, to evaluate communication patterns during on-call shifts for infectious disease (ID) fellows. Secure chat data is captured in Epic Clarity, a reporting database. The dataset comprised of messages sent between healthcare and administrative team members, including metadata fields such as sender ID, timestamp (converted to Eastern Standard Time), and conversation ID. A second data set with the assigned ID fellows on call was used to find the messages read for each call shift by the ID fellow on call.
+We analyzed six months worth of secure chat data, from Feb 12, 2024 through Aug 8, 2024, to evaluate communication patterns during on-call shifts for infectious disease (ID) fellows. Secure chat data is captured in Epic Clarity, a reporting database. The dataset comprised of messages sent between healthcare and administrative team members through desktop and mobile devices, including metadata fields such as sender ID, recipient ID, timestamp (converted to Eastern Standard Time), and conversation ID. A second data set with the assigned ID fellows on call was used to find the messages read for each call shift by the ID fellow on call. There was no missing or incomplete data in these data sets.
 
 ```{r}
 #| label: load-data
@@ -73,7 +73,7 @@ id.fellow.list <- c()
 Data preprocessing involved filtering chat records to include messages read by the ID fellows during their designated on-call hours (5:00 PM to 7:00 AM) and categorizing messages by call shift, rather than calendar dates.
 
 ```{r}
-#filter to only ID fellow chats Read for the month
+#filter to only ID fellow chats Read
 chats_read <- chats |>
   as.data.frame() |>
   filter(READER_USER_ID %in% id.fellow.list) |>
@@ -155,7 +155,7 @@ ggplot(chats_by_hour, aes(x = READ_HOUR_EST, y = number_read_chats)) +
 Ideally, ID fellows do not want to be on group chats overnight. To understand if group chats were contributing to the burden of overnight chats, we viewed the number of recipients on the messages they read. Nearly three-quarters of the chats were sent only to the ID fellow on call rather than multiple recipients.
 
 ```{r}
-#to get the number of recipients on each message, total the number of rows with the unique contact_date_real + convo_line minus 1 (to exclude the sender as a reader)
+#to get the number of recipients on each message, exclude messages with sender as the reader and total the number of rows with the unique contact_date_real + convo_line
 
 #first filter the chats dataframe for only the overnight chats
 chats_all_overnight <- chats |>
@@ -249,6 +249,39 @@ max_time_between_chats <- max_time_between_chats |>
   mutate(
     time_category = case_when(
       max_time_diff < 1 ~ "<1 hour",
+      max_time_diff < 2 ~ "1-2 hours",
+      max_time_diff < 3 ~ "2-3 hours",
+      max_time_diff < 4 ~ "3-4 hours",
+      max_time_diff < 5 ~ "4-5 hours",
+      max_time_diff < 6 ~ "5-6 hours",
+      max_time_diff < 7 ~ "6-7 hours",
+      max_time_diff < 8 ~ "7-8 hours",
+      max_time_diff > 8 ~ "8+ hours"
+    )
+  )
+
+#summarize
+time_category_summary <- max_time_between_chats |>
+  group_by(time_category) |>
+  summarise(count = n(), .groups = "drop") |>
+  mutate(percentage = (count / sum(count)) * 100)
+
+#view by the hour
+ggplot(time_category_summary, aes(x = time_category, y = percentage, fill = time_category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), vjust = -0.5, size = 3.5) +
+  ggtitle("Percentage of Calls by Maximum Time Between Chats") +
+  labs(x = "Maximum Time Interval", y = "Percentage of Overnight Call Shifts") +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+#Mixed feedback on best way to view this information. Cumulative chart included too.
+max_time_btwn_chats <- max_time_between_chats |>
+  mutate(
+    time_category = case_when(
+      max_time_diff < 1 ~ "<1 hour",
       max_time_diff < 2 ~ "<2 hours",
       max_time_diff < 3 ~ "<3 hours",
       max_time_diff < 4 ~ "<4 hours",
@@ -256,12 +289,12 @@ max_time_between_chats <- max_time_between_chats |>
       max_time_diff < 6 ~ "<6 hours",
       max_time_diff < 7 ~ "<7 hours",
       max_time_diff < 8 ~ "<8 hours",
-      TRUE ~ "8+ hours" #all remaining values
+      TRUE ~ "Up to 12 hours" #all remaining values
     )
   )
 
 #count totals in each category and calculate cumulative percentages
-cumulative_percentages <- max_time_between_chats |>
+cumulative_percentages <- max_time_btwn_chats |>
   group_by(time_category) |>
   summarize(count = n(), .groups = "drop") |>
   arrange(match(time_category, c("<1 hour", "<2 hours", "<3 hours", "<4 hours", "<5 hours", 
@@ -271,6 +304,7 @@ cumulative_percentages <- max_time_between_chats |>
     cumulative_percentage = 100 * cumulative_count / sum(count)
   )
 
+#view the cumulative chart
 ggplot(cumulative_percentages, aes(x = time_category, y = cumulative_percentage, fill = time_category)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = paste0(round(cumulative_percentage, 1), "%")), 
@@ -287,7 +321,7 @@ These visualizations help us understand the impact of maximum possible continuou
 
 ### Chat Sender Information
 
-To help guide future interventions for optimizing communication through secure chat to ID fellows overnight, we wanted to understand who was sending these chats. The assignment data for one month of chats was obtained for initial exploration. Each user can have multiple roles at a given time and many senders did not have any role assigned at the time that the chat was sent. Due to the complications related to combining the data in a meaningful way without changing the granularity of the final data frame, I instead opted to look directly at the employee table in Epic Clarity to understand who the senders were. This choice did mean that we lost some information, such as the unit a provider was working on at the time of the chat (ie PICU) or their specific role (i.e. charge nurse, bedside nurse). In addition, the employee table is a static snapshot of users at the time the information is obtained, which means there may be some in inaccuracies for those who have changed roles since the time a chat was sent. Despite these drawbacks, we felt that the information gained would lead to insights with which we could inform our future interventions.
+To help guide future interventions for optimizing communication through secure chat to ID fellows overnight, we wanted to understand who was sending these chats. The assignment data for one month of chats was obtained for initial exploration. Each user can have multiple roles at a given time and many senders did not have any role assigned at the time that the chat was sent. Due to the complications related to combining the data in a meaningful way without changing the granularity of the final data frame, I instead opted to look directly at the employee table in Epic Clarity to understand who the senders were. This choice did mean that we lost some information, such as the unit a provider was working on at the time of the chat (ie PICU) or their specific role (i.e. charge nurse, bedside nurse). In addition, the employee table is a static snapshot of users at the time the information is obtained, which means there may be some in inaccuracies for those who have changed roles since the time a chat was sent. Despite these drawbacks, we felt that the information gained would lead to insights with which could inform our future interventions.
 
 ```{r}
 library(writexl)
@@ -298,8 +332,65 @@ senders <- as.data.frame(unique(chatsoncall$SENDER_USER_ID))
 #save as excel document
 write_xlsx(senders, "unique_senders.xlsx")
 
-#THIS ANALYSIS IS STILL PENDING :)
+#upload document that includes the employee information
+emp_data <- read.csv("~/Documents/Masters of Biomedical Informatics/503 Data Science/Final Project/Employee Data.csv")
 
+#merge tables
+chatswithemp <- chatsoncall |>
+  left_join(emp_data, by = c("SENDER_USER_ID" = "EMP_ID"))
+
+#group chats by job family
+chats_by_job_family <- chatswithemp |>
+  group_by(JOB_FAMILY) %>%
+  summarize(chat_count = n(), .groups = "drop")
+
+#top roles only (top 10 had > 6 chats)
+top_roles <- chats_by_job_family |>
+  arrange(desc(chat_count)) |>
+  filter(!is.na(JOB_FAMILY)) |>
+  filter(JOB_FAMILY != "") |>
+  slice_head(n = 10)
+
+#graph by job family
+ggplot(top_roles, aes(x = reorder(JOB_FAMILY, -chat_count), y = chat_count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  ggtitle("Count of Chats by Job Family") +
+  labs(x = "Job Family", y = "Count of Chats") +
+  geom_text(aes(label = chat_count), vjust = 0, size = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+It looks like a vast majority of these chats are sent by physicians and APPs. To better understand the percentage of chats from those roles, we can do additional calculations.
+
+```{r}
+#define the roles we're interested in
+roles_of_interest <- c("Physician in Training", "Physician", "Nursing Inptnt Adv Pract Nurse")
+
+#filter for rows with the roles we're interested in
+filtered_roles <- chatswithemp |>
+  filter(JOB_FAMILY %in% roles_of_interest) |>
+  count(JOB_FAMILY)
+
+#get the total number of chats for denominator
+total_chat_count <- chatsoncall |>
+  count()
+
+#calculate the percentage
+role_chat_count <- filtered_roles |>
+  mutate(percentage = n / total_chat_count$n * 100)
+
+#graph by role chat count percentage
+ggplot(role_chat_count, aes(x = reorder(JOB_FAMILY, -percentage) , y = percentage)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  ggtitle("Percentage of Total Chats by Top Three Job Families") +
+  labs(x = "Job Family", y = "Count of Chats") +
+  geom_text(aes(label = round(percentage, 0)), vjust = 0, size = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+sum(role_chat_count$percentage)
 ```
 
 ## Conclusion
@@ -310,7 +401,15 @@ The hourly distribution of chat messages read by ID fellows during overnight cal
 
 Additionally, the recipient group size analysis reveals that 72.7% of messages are directed to a single recipient: the ID fellow on call. About 1% of messages are sent to five or more recipients. This indicates that secure chat messageswith ID fellows overnight is predominantly focused on targeted, one-to-one communication rather than broad group messaging. However, over one quarter of the messages read had more than one recipient, which suggests some room for improvement to help ensure ID fellows are necessary recipients on a message overnight.
 
-Finally, the distribution of maximum time intervals between chats shows that more than one quarter of the shifts go less than 2 hours maximum between chats for the entire shift. Over 60% of calls have a maximum interval of less than 4 hours between messages. This finding suggests a high frequency of interruptions during overnight call shifts, with significant implications for workflow and rest opportunities.
+The distribution of maximum time intervals between chats shows that more than one quarter of the shifts go less than 2 hours maximum between chats for the entire shift. Over 60% of calls have a maximum interval of less than 4 hours between messages. This finding suggests a high frequency of interruptions during overnight call shifts, with significant implications for workflow and rest opportunities.
+
+Finally, nearly 90% of all messages are coming from physicians and advance practice providers (APPs). Physicians and APPs are responsible for the same percentage of messages with exactly one and more than one recipient. This information can help guide education-based interventions or targeted messaging to these specific roles.
+
+## Next Steps
+
+We have met with a lead fellow for infectious disease to discuss our findings and brainstorm possible interventions to improve their secure chat experience. Given the large number of chats at the start of the shift, there may be improved in person communication on specific services that can alleviate some of the chat burden. They will also focus education on physicians in training (residents). They have implemented messaging with instructions on when to reach out to the antimicrobial stewardship team or infection prevention (instead of infectious disease fellows) and will monitor for improvements there.
+
+There are three fellowship-supported services at the hospital that take home call. This analysis will be run for the other two services (endocrinology and rheumatology) and a comparative analysis will be done between the different clinical services. We also plan to dive deeper into understanding the group chats, looking at length of conversation, timing of conversation, and senders to help target interventions at decreasing group chats. Lastly, there is a wealth of data in the actual text of the chats that we would love to explore in the future.
 
 ## References
 
